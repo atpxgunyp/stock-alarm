@@ -7,19 +7,24 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          # 파이썬 버전을 최신 3.12로 업그레이드 (에러 해결 핵심)
+          python-version: '3.12'
 
-      - name: Install
+      - name: Install Libraries
         run: |
-          pip install finance-datareader pandas_ta requests pytz lxml
+          python -m pip install --upgrade pip
+          # 라이브러리를 하나씩 설치하여 충돌을 방지합니다.
+          pip install requests pytz lxml yfinance
+          pip install finance-datareader
+          pip install pandas_ta
 
-      - name: Start
+      - name: Start Bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
