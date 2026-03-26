@@ -1,0 +1,21 @@
+name: Stock-Bot-Auto
+on:
+  schedule:
+    - cron: '0,30 * * * *'
+  workflow_dispatch: # 수동 실행 버튼
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install
+        run: pip install finance-datareader pandas_ta python-telegram-bot pytz
+      - name: Start
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python main.py
