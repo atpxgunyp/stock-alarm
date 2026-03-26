@@ -6,8 +6,6 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    env:
-      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -20,8 +18,7 @@ jobs:
       - name: Install Libraries
         run: |
           python -m pip install --upgrade pip
-          # 버전 충돌을 방지하기 위해 라이브러리 버전을 고정합니다.
-          pip install finance-datareader pandas_ta "python-telegram-bot<20.0" pytz lxml
+          pip install finance-datareader pandas_ta python-telegram-bot pytz lxml yfinance
 
       - name: Start Bot
         env:
