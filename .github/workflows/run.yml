@@ -6,8 +6,8 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    # Node.js 24 환경을 강제로 사용하도록 설정 (경고 제거 핵심)
     env:
-      # Node.js 24 환경을 미리 사용하도록 설정 (경고 제거 핵심)
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout Repository
