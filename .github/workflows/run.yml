@@ -6,14 +6,17 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    env:
+      # Node.js 24 환경을 미리 사용하도록 설정 (경고 제거 핵심)
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4 # v3 -> v4로 업데이트
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5 # v4 -> v5로 업데이트
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # 안정적인 최신 파이썬 버전
+          python-version: '3.11'
 
       - name: Install Libraries
         run: |
