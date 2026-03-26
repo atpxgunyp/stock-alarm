@@ -2,19 +2,18 @@ name: Stock-Bot-Auto
 on:
   schedule:
     - cron: '0,30 * * * *'
-  workflow_dispatch: # 수동 실행 버튼
+  workflow_dispatch: 
 jobs:
   run:
     runs-on: ubuntu-latest
-    # Node.js 24 환경을 강제로 사용하도록 설정 (경고 제거 핵심)
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        # Node 24 대응이 완료된 정확한 세부 버전을 사용합니다.
+        uses: actions/checkout@v4.1.7 
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        # Node 24 지원 패치가 끝난 버전을 명시합니다.
+        uses: actions/setup-python@v5.1.1
         with:
           python-version: '3.11'
 
