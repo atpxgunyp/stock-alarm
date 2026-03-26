@@ -6,14 +6,17 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    # 시스템 경고를 강제로 끄는 옵션들입니다.
+    env:
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NODE_OPTIONS: "--no-deprecation"
     steps:
       - name: Checkout Repository
-        # Node 24 대응이 완료된 정확한 세부 버전을 사용합니다.
-        uses: actions/checkout@v4.1.7 
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        # Node 24 지원 패치가 끝난 버전을 명시합니다.
-        uses: actions/setup-python@v5.1.1
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
