@@ -8,12 +8,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4 # v3에서 v4로 업데이트
+        uses: actions/checkout@v4 # v3 -> v4로 업데이트
 
       - name: Set up Python
-        uses: actions/setup-python@v5 # v4에서 v5로 업데이트
+        uses: actions/setup-python@v5 # v4 -> v5로 업데이트
         with:
-          python-version: '3.11' # 파이썬 버전도 최신 안정화 버전으로 업그레이드
+          python-version: '3.11' # 안정적인 최신 파이썬 버전
 
       - name: Install Libraries
         run: |
