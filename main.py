@@ -12,21 +12,29 @@ def send_alert(message):
     try: requests.post(url, json={"chat_id": CHAT_ID, "text": message})
     except: pass
 
+def check_status_request():
+    """사용자가 '작동'이라고 물어봤는지 확인하고 대답합니다."""
+    if not TOKEN: return
+    try:
+        url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
+        res = requests.get(url).json()
+        if res.get("result"):
+            # 가장 최근 메시지 하나를 확인
+            last_msg = res["result"][-1].get("message", {}).get("text", "")
+            if "작동" in last_msg:
+                now = datetime.now(pytz.timezone('Asia/Seoul')).strftime('%H:%M:%S')
+                send_alert(f"✅ 현재 정상 작동 중입니다!\n마지막 확인 시간: {now}\n(30분 단위로 스캔 중)")
+    except: pass
+
 def get_market_status():
     seoul_tz = pytz.timezone('Asia/Seoul')
     now = datetime.now(seoul_tz)
     if now.weekday() >= 5: return "OFF"
-    
     curr = now.hour * 100 + now.minute
-    
-    # 한국 시장 체크
     if 900 <= curr <= 1540: return "KOREA"
-    if 1541 <= curr <= 1605: return "KOREA_DONE" # 장 마감 직후
-    
-    # 미국 시장 체크 (서머타임 미고려 기준, 필요 시 시간 조정 가능)
+    if 1541 <= curr <= 1605: return "KOREA_DONE"
     if curr >= 2230 or curr <= 500: return "USA"
-    if 501 <= curr <= 535: return "USA_DONE" # 장 마감 직후
-    
+    if 501 <= curr <= 535: return "USA_DONE"
     return "WAIT"
 
 def scan(m_type):
@@ -43,17 +51,13 @@ def scan(m_type):
                 symbol, name = row[s_col], row[n_col]
                 df = fdr.DataReader(symbol).tail(60)
                 if len(df) < 30: continue
-                
-                curr_p = df['Close'].iloc[-1]
-                prev_p = df['Close'].iloc[-2]
+                curr_p, prev_p = df['Close'].iloc[-1], df['Close'].iloc[-2]
                 rsi = ta.rsi(df['Close'], length=14).iloc[-1]
                 bb = ta.bbands(df['Close'], length=20, std=2)
                 macd_df = ta.macd(df['Close'])
                 ma5 = ta.sma(df['Close'], length=5).iloc[-1]
                 
                 conditions = []
-
-                # 매수 분석
                 if rsi < 40 and curr_p < prev_p:
                     if curr_p > ma5: conditions.append("✅ 5일선 돌파")
                     if curr_p < bb['BBL_20_2.0'].iloc[-1] * 1.02: conditions.append("✅ 볼린저 하단")
@@ -61,8 +65,6 @@ def scan(m_type):
                     if conditions:
                         diff = ((curr_p - prev_p) / prev_p) * 100
                         send_alert(f"🟢 [매수포착] {name}\n현재가: {curr_p:,} ({diff:.2f}%)\n전일종가: {prev_p:,}\nRSI: {rsi:.1f}\n" + "\n".join(conditions))
-
-                # 매도 분석
                 elif rsi > 60 and curr_p > prev_p:
                     if curr_p < ma5: conditions.append("❌ 5일선 하회")
                     if curr_p > bb['BBU_20_2.0'].iloc[-1] * 0.98: conditions.append("❌ 볼린저 상단")
@@ -74,14 +76,5 @@ def scan(m_type):
     except: pass
 
 if __name__ == "__main__":
-    status = get_market_status()
-    today_str = datetime.now(pytz.timezone('Asia/Seoul')).strftime('%Y-%m-%d')
-    
-    if status == "KOREA":
-        scan("KOREA")
-    elif status == "KOREA_DONE":
-        send_alert(f"🏁 [{today_str}] 한국 주식 시장 마감되었습니다.")
-    elif status == "USA":
-        scan("USA")
-    elif status == "USA_DONE":
-        send_alert(f"🏁 [{today_str}] 미국 주식 시장 마감되었습니다.")
+    # 1. 사용자가 질문했는지 확인
+    check_status_request()
