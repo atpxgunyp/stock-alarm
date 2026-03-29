@@ -1,23 +1,21 @@
-name: 5Min Market Monitor
+name: Market Hours Monitor
 on:
   schedule:
-    - cron: '*/5 * * * *' 
-  workflow_dispatch:
+    - cron: '0 */4 * * *' # 4시간마다 스케줄러가 확인
+  workflow_dispatch: # 직접 [Run workflow] 버튼을 눌러 즉시 시작 가능
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-      - name: Install dependencies
+      - name: Dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install pandas finance-datareader pyupbit pytz requests
-      - name: Run Monitor
+      - name: Run Realtime Loop
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
