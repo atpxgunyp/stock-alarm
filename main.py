@@ -1,112 +1,101 @@
 import FinanceDataReader as fdr
 import pyupbit
 import os, requests, pytz, time
-import pandas as pd
 from datetime import datetime
 
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 
-def send_alert(message):
-    if not TOKEN or not CHAT_ID: return
+def send_alert(msg):
+    if not (TOKEN and CHAT_ID): return
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": CHAT_ID, "text": message}, timeout=10)
+        requests.post(url, json={"chat_id": CHAT_ID, "text": msg}, timeout=10)
     except: pass
-
-def get_indicators(df):
-    try:
-        if df is None or len(df) < 35: return None
-        d = df[['Close']].copy()
-        close = d['Close']
-        
-        # RSI (0 나누기 방지)
-        diff = close.diff()
-        up = diff.where(diff > 0, 0).rolling(window=14).mean()
-        down = (-diff.where(diff < 0, 0)).rolling(window=14).mean()
-        d['RSI'] = 100 - (100 / (1 + (up / (down + 1e-10))))
-        
-        # 지표 계산
-        d['MA20'] = close.rolling(window=20).mean()
-        d['STD20'] = close.rolling(window=20).std()
-        d['BBU'] = d['MA20'] + (d['STD20'] * 2)
-        d['BBL'] = d['MA20'] - (d['STD20'] * 2)
-        d['MA5'] = close.rolling(window=5).mean()
-        
-        # MACD
-        ema12 = close.ewm(span=12, adjust=False).mean()
-        ema26 = close.ewm(span=26, adjust=False).mean()
-        d['MACD'] = ema12 - ema26
-        d['SIGNAL'] = d['MACD'].ewm(span=9, adjust=False).mean()
-        
-        return d
-    except: return None
 
 def analyze(df, name, is_coin=False):
     try:
-        data = get_indicators(df)
-        if data is None: return
+        if df is None or len(df) < 35: return
+        c = df['Close']
+        prev_close = df['Close'].iloc[-2] # 전일 종가
+        curr_price = c.iloc[-1]
         
-        c, p = data.iloc[-1], data.iloc[-2]
-        if pd.isna(c['RSI']): return
+        # RSI 14 (문턱 40/60)
+        diff = c.diff()
+        up = diff.where(diff > 0, 0).rolling(14).mean()
+        down = (-diff.where(diff < 0, 0)).rolling(14).mean()
+        rsi = 100 - (100 / (1 + (up / (down + 1e-10))))
+        curr_rsi = rsi.iloc[-1]
 
-        msg = []
-        # 매수/매도 로직
-        if c['RSI'] < 45 and c['Close'] < p['Close']:
-            if c['Close'] > c['MA5'] * 0.97: msg.append("✅ 5일선 지지")
-            if c['Close'] < c['BBL'] * 1.05: msg.append("✅ 하단 밴드 영역")
-            if c['MACD'] > c['SIGNAL']: msg.append("✅ MACD 우상향")
-            if msg:
-                tag = "🪙 [코인매수]" if is_coin else "🟢 [주식매수]"
-                send_alert(f"{tag} {name}\n가: {c['Close']:,.0f}\nRSI: {c['RSI']:.1f}\n" + "\n".join(msg))
-        elif c['RSI'] > 55 and c['Close'] > p['Close']:
-            if c['Close'] < c['MA5'] * 1.03: msg.append("❌ 5일선 이탈")
-            if c['Close'] > c['BBU'] * 0.95: msg.append("❌ 상단 밴드 영역")
-            if c['MACD'] < c['SIGNAL']: msg.append("❌ MACD 우하향")
-            if msg:
-                tag = "🪙 [코인매도]" if is_coin else "🔴 [주식매도]"
-                send_alert(f"{tag} {name}\n가: {c['Close']:,.0f}\nRSI: {c['RSI']:.1f}\n" + "\n".join(msg))
+        # 지표 계산
+        ma5 = c.rolling(5).mean()
+        ma20 = c.rolling(20).mean()
+        std20 = c.rolling(20).std()
+        bbu, bbl = ma20 + (std20 * 2), ma20 - (std20 * 2)
+        ema12, ema26 = c.ewm(span=12).mean(), c.ewm(span=26).mean()
+        macd = ema12 - ema26
+        pmacd = macd.iloc[-2]
+
+        # 조건 체크 (1:5일선, 2:볼밴, 3:MACD)
+        cond = []
+        if (curr_price >= ma5.iloc[-1] * 0.98): cond.append("1")
+        if (curr_price <= bbl.iloc[-1] * 1.03): cond.append("2")
+        if (macd.iloc[-1] > pmacd): cond.append("3")
+
+        # [매수] RSI 40 이하 + (주식은 전일종가 미만 필수) + 조건 중 하나
+        if curr_rsi <= 40 and (is_coin or curr_price < prev_close):
+            if cond:
+                tag = "🪙" if is_coin else "🟢"
+                send_alert(f"{tag} {name} {curr_rsi:.0f} ({','.join(cond)})")
+
+        # [매도] RSI 60 이상 + (주식은 전일종가 초과 필수) + 조건 중 하나
+        elif curr_rsi >= 60 and (is_coin or curr_price > prev_close):
+            # 매도용 조건 다시 계산 (방향 반대)
+            m_cond = []
+            if (curr_price <= ma5.iloc[-1] * 1.02): m_cond.append("1")
+            if (curr_price >= bbu.iloc[-1] * 0.97): m_cond.append("2")
+            if (macd.iloc[-1] < pmacd): m_cond.append("3")
+            
+            if m_cond:
+                tag = "🪙" if is_coin else "🔴"
+                send_alert(f"{tag} {name} {curr_rsi:.0f} ({','.join(m_cond)})")
     except: pass
 
-def scan_market():
-    # 1. 코인 스캔 (언제나 실행)
-    for t in ["KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-DOGE"]:
-        try:
-            df = pyupbit.get_ohlcv(t, interval="day", count=60)
-            if df is not None: analyze(df, t.replace("KRW-",""), True)
-            time.sleep(0.2)
-        except: continue
+def run():
+    now = datetime.now(pytz.timezone('Asia/Seoul'))
+    curr_time = now.hour * 100 + now.minute
 
-    # 2. 주식 시간대 체크 (한국 시간 기준)
-    tz = pytz.timezone('Asia/Seoul')
-    now = datetime.now(tz)
-    curr = now.hour * 100 + now.minute
-    
-    # 평일 주식 스캔 (주말엔 코인만 하고 종료)
-    if now.weekday() < 5:
-        # 한국 장 시간 (09:00 ~ 15:40)
-        if 900 <= curr <= 1540:
-            try:
-                krx = fdr.StockListing('KRX').head(50) # 시총 상위 50개
-                for _, row in krx.iterrows():
-                    try:
-                        df = fdr.DataReader(row['Code']).tail(60)
-                        analyze(df, row['Name'])
-                        time.sleep(0.2)
-                    except: continue
-            except: pass
-            
-        # 미국 장 시간 (22:30 ~ 05:00)
-        elif curr >= 2230 or curr <= 500:
-            try:
-                sp500 = fdr.StockListing('S&P500').head(50) # 상위 50개
-                for _, row in sp500.iterrows():
-                    try:
-                        df = fdr.DataReader(row['Symbol']).tail(60)
-                        analyze(df, row['Symbol'])
-                        time.sleep(0.2)
-                    except: continue
-            except: pass
+    if 1540 <= curr_time <= 1600 and now.weekday() < 5:
+        send_alert("🇰🇷 한국 시장 종료")
+        return 
+    if 500 <= curr_time <= 530 and now.weekday() < 5:
+        send_alert("🇺🇸 미국 시장 종료")
+        return
+
+    # 코인 20개
+    try:
+        for t in pyupbit.get_tickers(fiat="KRW")[:20]:
+            analyze(pyupbit.get_ohlcv(t, count=50), t.split("-")[1], True)
+            time.sleep(0.05)
+    except: pass
+
+    # 국장 100개
+    if now.weekday() < 5 and 900 <= curr_time < 1540:
+        try:
+            krx = fdr.StockListing('KRX').sort_values('Marcap', ascending=False).head(100)
+            for _, r in krx.iterrows():
+                analyze(fdr.DataReader(r['Code']).tail(50), r['Name'])
+                time.sleep(0.05)
+        except: pass
+
+    # 미장 100개
+    if curr_time >= 2230 or curr_time < 500:
+        try:
+            us = fdr.StockListing('S&P500').head(100)
+            for _, r in us.iterrows():
+                analyze(fdr.DataReader(r['Symbol']).tail(50), r['Symbol'])
+                time.sleep(0.05)
+        except: pass
 
 if __name__ == "__main__":
-    scan_market()
+    run()
