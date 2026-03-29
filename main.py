@@ -28,39 +28,43 @@ def get_market_status():
 
 def analyze_logic(df, name, is_coin=False):
     try:
-        if df is None or len(df) < 40: return
+        # 데이터 유효성 검사 (최소 50개 확보)
+        if df is None or len(df) < 50: return
         
-        close = df['Close']
-        rsi = ta.rsi(close, length=14)
-        bb = ta.bbands(close, length=20, std=2)
-        macd = ta.macd(close)
-        ma5 = ta.sma(close, length=5)
+        # 지표 계산
+        df.ta.rsi(length=14, append=True)
+        df.ta.bbands(length=20, std=2, append=True)
+        df.ta.macd(fast=12, slow=26, signal=9, append=True)
+        df.ta.sma(length=5, append=True)
 
-        if rsi is None or bb is None or macd is None or ma5 is None: return
+        # 계산된 지표 컬럼 찾기 (대소문자 구분 없이)
+        rsi_col = [c for c in df.columns if 'RSI' in c.upper()]
+        lbb_col = [c for c in df.columns if 'BBL' in c.upper()]
+        ubb_col = [c for c in df.columns if 'BBU' in c.upper()]
+        macd_col = [c for c in df.columns if 'MACD' in c.upper() and 'S' not in c.upper()]
+        sig_col = [c for c in df.columns if 'MACDS' in c.upper()]
+        ma5_col = [c for c in df.columns if 'SMA_5' in c.upper()]
 
-        curr_p, prev_p = close.iloc[-1], close.iloc[-2]
-        curr_rsi = rsi.iloc[-1]
+        if not (rsi_col and lbb_col and ubb_col and macd_col and sig_col and ma5_col): return
+
+        curr_p, prev_p = df['Close'].iloc[-1], df['Close'].iloc[-2]
+        curr_rsi = df[rsi_col[0]].iloc[-1]
         
-        lbb_list = [c for c in bb.columns if 'BBL' in c]
-        ubb_list = [c for c in bb.columns if 'BBU' in c]
-        macd_list = [c for c in macd.columns if 'MACD_' in c and 's' not in c]
-        sig_list = [c for c in macd.columns if 'MACDs_' in c]
-
-        if not (lbb_list and ubb_list and macd_list and sig_list): return
-
         conds = []
+        # 매수 조건 (RSI 45 미만 + 하락 중)
         if curr_rsi < 45 and curr_p < prev_p:
-            if curr_p > ma5.iloc[-1] * 0.97: conds.append("✅ 5일선 근접/돌파")
-            if curr_p < bb[lbb_list[0]].iloc[-1] * 1.07: conds.append("✅ 볼린저 하단영역")
-            if macd[macd_list[0]].iloc[-1] > macd[sig_list[0]].iloc[-1]: conds.append("✅ MACD 우상향")
+            if curr_p > df[ma5_col[0]].iloc[-1] * 0.97: conds.append("✅ 5일선 근접/돌파")
+            if curr_p < df[lbb_col[0]].iloc[-1] * 1.07: conds.append("✅ 볼린저 하단영역")
+            if df[macd_col[0]].iloc[-1] > df[sig_col[0]].iloc[-1]: conds.append("✅ MACD 우상향")
             if conds:
                 tag = "🪙 [코인매수]" if is_coin else "🟢 [주식매수]"
                 send_alert(f"{tag} {name}\n가: {curr_p:,.0f}\nRSI: {curr_rsi:.1f}\n" + "\n".join(conds))
 
+        # 매도 조건 (RSI 55 초과 + 상승 중)
         elif curr_rsi > 55 and curr_p > prev_p:
-            if curr_p < ma5.iloc[-1] * 1.03: conds.append("❌ 5일선 이탈징후")
-            if curr_p > bb[ubb_list[0]].iloc[-1] * 0.93: conds.append("❌ 볼린저 상단영역")
-            if macd[macd_list[0]].iloc[-1] < macd[sig_list[0]].iloc[-1]: conds.append("❌ MACD 우하향")
+            if curr_p < df[ma5_col[0]].iloc[-1] * 1.03: conds.append("❌ 5일선 이탈징후")
+            if curr_p > df[ubb_col[0]].iloc[-1] * 0.93: conds.append("❌ 볼린저 상단영역")
+            if df[macd_col[0]].iloc[-1] < df[sig_col[0]].iloc[-1]: conds.append("❌ MACD 우하향")
             if conds:
                 tag = "🪙 [코인매도]" if is_coin else "🔴 [주식매도]"
                 send_alert(f"{tag} {name}\n가: {curr_p:,.0f}\nRSI: {curr_rsi:.1f}\n" + "\n".join(conds))
@@ -73,7 +77,7 @@ def scan_stocks(m_type):
             stocks = fdr.StockListing('KRX').sort_values('Marcap', ascending=False).head(100)
             for _, row in stocks.iterrows():
                 try:
-                    df = fdr.DataReader(row['Code']).tail(60)
+                    df = fdr.DataReader(row['Code']).tail(100)
                     analyze_logic(df, row['Name'])
                     time.sleep(0.1)
                 except: continue
@@ -81,7 +85,7 @@ def scan_stocks(m_type):
             stocks = fdr.StockListing('S&P500').head(100)
             for _, row in stocks.iterrows():
                 try:
-                    df = fdr.DataReader(row['Symbol']).tail(60)
+                    df = fdr.DataReader(row['Symbol']).tail(100)
                     analyze_logic(df, row['Symbol'])
                     time.sleep(0.1)
                 except: continue
@@ -91,7 +95,7 @@ def scan_coins():
     tickers = ["KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-ADA", "KRW-DOGE", "KRW-DOT", "KRW-TRX", "KRW-AVAX", "KRW-LINK"]
     for t in tickers:
         try:
-            df = pyupbit.get_ohlcv(t, interval="day", count=60)
+            df = pyupbit.get_ohlcv(t, interval="day", count=100)
             if df is not None:
                 analyze_logic(df, t.replace("KRW-",""), is_coin=True)
             time.sleep(0.1)
