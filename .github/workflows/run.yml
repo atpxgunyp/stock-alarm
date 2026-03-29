@@ -1,30 +1,28 @@
-name: Stock-Bot-Auto
+name: Stock and Crypto Bot
+
 on:
   schedule:
-    - cron: '0,30 * * * *'
-  workflow_dispatch: 
+    - cron: '0,30 * * * *'  # <-- 1-5를 삭제하고 *로 변경 (매일 30분마다 실행)
+  workflow_dispatch:
+
 jobs:
-  run:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v2
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: 
+        uses: actions/setup-python@v2
         with:
-          # 파이썬 버전을 최신 3.12로 업그레이드 (에러 해결 핵심)
-          python-version: '3.12'
+          python-version: '3.9'
 
-      - name: Install Libraries
+      - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          # 라이브러리를 하나씩 설치하여 충돌을 방지합니다.
-          pip install requests pytz lxml yfinance
-          pip install finance-datareader
-          pip install pandas_ta
-
-      - name: Start Bot
+          pip install pandas pandas_ta FinanceDataReader requests pytz pyupbit  # <-- pyupbit 추가
+          
+      - name: Run bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
