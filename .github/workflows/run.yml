@@ -2,8 +2,8 @@ name: Stock and Crypto Bot
 
 on:
   schedule:
-    - cron: '0,30 * * * *'  # 매일 30분마다 실행 (주말 포함)
-  workflow_dispatch:        # 수동 실행 버튼 활성화
+    - cron: '0,30 * * * *'  # 30분마다 실행 (주말 포함)
+  workflow_dispatch:        # 수동 실행 버튼
 
 jobs:
   build:
