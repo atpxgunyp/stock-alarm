@@ -13,7 +13,7 @@ def send_alert(msg):
         requests.post(url, json={"chat_id": CHAT_ID, "text": msg}, timeout=10)
     except: pass
 
-def analyze(df, name, is_coin=False):
+def analyze(df, name, market_type):
     try:
         if df is None or len(df) < 35: return
         c = df['Close']
@@ -36,60 +36,63 @@ def analyze(df, name, is_coin=False):
         macd = ema12 - ema26
         pmacd = macd.iloc[-2]
 
+        # 시장별 태그 설정
+        market_tag = f"[{market_type}]" # [국장], [미장], [코인]
+        
         # [매수] RSI 40 이하 + (주식은 전일종가 미만)
-        if curr_rsi <= 40 and (is_coin or curr_price < prev_close):
+        if curr_rsi <= 40 and (market_type == "코인" or curr_price < prev_close):
             cond = []
             if (curr_price >= ma5.iloc[-1] * 0.98): cond.append("1")
             if (curr_price <= bbl.iloc[-1] * 1.03): cond.append("2")
             if (macd.iloc[-1] > pmacd): cond.append("3")
             if cond:
-                send_alert(f"{'🪙' if is_coin else '🟢'} {name} {curr_rsi:.0f} ({','.join(cond)})")
+                send_alert(f"🟢{market_tag} {name} {curr_rsi:.0f} ({','.join(cond)})")
 
         # [매도] RSI 60 이상 + (주식은 전일종가 초과)
-        elif curr_rsi >= 60 and (is_coin or curr_price > prev_close):
+        elif curr_rsi >= 60 and (market_type == "코인" or curr_price > prev_close):
             m_cond = []
             if (curr_price <= ma5.iloc[-1] * 1.02): m_cond.append("1")
             if (curr_price >= bbu.iloc[-1] * 0.97): m_cond.append("2")
             if (macd.iloc[-1] < pmacd): m_cond.append("3")
             if m_cond:
-                send_alert(f"{'🪙' if is_coin else '🔴'} {name} {curr_rsi:.0f} ({','.join(m_cond)})")
+                send_alert(f"🔴{market_tag} {name} {curr_rsi:.0f} ({','.join(m_cond)})")
     except: pass
 
 def run():
     now = datetime.now(pytz.timezone('Asia/Seoul'))
     curr_time = now.hour * 100 + now.minute
 
-    # 장 종료 알림 (5분 주기이므로 범위를 좁게 설정하여 중복 방지)
-    if 1540 <= curr_time <= 1545 and now.weekday() < 5:
-        send_alert("🇰🇷 한국 시장 종료")
+    # 장 종료 알림 (5분 주기 중복 방지 위해 범위 좁게 설정)
+    if 1540 <= curr_time <= 1546 and now.weekday() < 5:
+        send_alert("🏁 [국장] 당일 시장이 종료되었습니다.")
         return 
-    if 500 <= curr_time <= 505 and now.weekday() < 5:
-        send_alert("🇺🇸 미국 시장 종료")
+    if 500 <= curr_time <= 506 and now.weekday() < 5:
+        send_alert("🏁 [미장] 당일 시장이 종료되었습니다.")
         return
 
-    # 1. 코인 상위 10개
+    # 1. 코인 상위 10개 (24시간)
     try:
         coins = pyupbit.get_tickers(fiat="KRW")[:10]
         for t in coins:
-            analyze(pyupbit.get_ohlcv(t, interval="minute1", count=50), t.split("-")[1], True)
+            analyze(pyupbit.get_ohlcv(t, interval="minute1", count=50), t.split("-")[1], "코인")
             time.sleep(0.05)
     except: pass
 
-    # 2. 한국 주식 상위 100개
+    # 2. 한국 주식 상위 100개 (09:00 ~ 15:40)
     if now.weekday() < 5 and 900 <= curr_time < 1540:
         try:
             krx = fdr.StockListing('KRX').sort_values('Marcap', ascending=False).head(100)
             for _, r in krx.iterrows():
-                analyze(fdr.DataReader(r['Code']).tail(50), r['Name'])
+                analyze(fdr.DataReader(r['Code']).tail(50), r['Name'], "국장")
                 time.sleep(0.05)
         except: pass
 
-    # 3. 미국 주식 상위 100개
+    # 3. 미국 주식 상위 100개 (22:30 ~ 05:00)
     if curr_time >= 2230 or curr_time < 500:
         try:
             us = fdr.StockListing('S&P500').head(100)
             for _, r in us.iterrows():
-                analyze(fdr.DataReader(r['Symbol']).tail(50), r['Symbol'])
+                analyze(fdr.DataReader(r['Symbol']).tail(50), r['Symbol'], "미장")
                 time.sleep(0.05)
         except: pass
 
