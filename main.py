@@ -10,20 +10,10 @@ CHAT_ID = os.environ.get('CHAT_ID')
 def send_alert(message):
     if not TOKEN or not CHAT_ID: return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    try: requests.post(url, json={"chat_id": CHAT_ID, "text": message}, timeout=10)
-    except: pass
-
-def check_status_reply():
     try:
-        url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
-        res = requests.get(url, timeout=10).json()
-        if res.get("result"):
-            last_msg = res["result"][-1].get("message", {})
-            text, msg_date = last_msg.get("text", ""), last_msg.get("date", 0)
-            if "작동" in text and (time.time() - msg_date < 1800):
-                now = datetime.now(pytz.timezone('Asia/Seoul')).strftime('%H:%M:%S')
-                send_alert(f"✅ 봇 정상 작동 중!\n확인 시간: {now}\n(주식+코인 통합 감시 중)")
-    except: pass
+        requests.post(url, json={"chat_id": CHAT_ID, "text": message}, timeout=10)
+    except:
+        pass
 
 def get_market_status():
     seoul_tz = pytz.timezone('Asia/Seoul')
@@ -38,9 +28,8 @@ def get_market_status():
 
 def analyze_logic(df, name, is_coin=False):
     try:
-        if df is None or len(df) < 35: return
+        if df is None or len(df) < 40: return
         
-        # 지표 계산 (안전하게 계산하기 위해 데이터 보장)
         close = df['Close']
         rsi = ta.rsi(close, length=14)
         bb = ta.bbands(close, length=20, std=2)
@@ -52,7 +41,6 @@ def analyze_logic(df, name, is_coin=False):
         curr_p, prev_p = close.iloc[-1], close.iloc[-2]
         curr_rsi = rsi.iloc[-1]
         
-        # 컬럼명 유연하게 찾기 (에러 방지 핵심)
         lbb_list = [c for c in bb.columns if 'BBL' in c]
         ubb_list = [c for c in bb.columns if 'BBU' in c]
         macd_list = [c for c in macd.columns if 'MACD_' in c and 's' not in c]
@@ -61,7 +49,6 @@ def analyze_logic(df, name, is_coin=False):
         if not (lbb_list and ubb_list and macd_list and sig_list): return
 
         conds = []
-        # [매수 조건]
         if curr_rsi < 45 and curr_p < prev_p:
             if curr_p > ma5.iloc[-1] * 0.97: conds.append("✅ 5일선 근접/돌파")
             if curr_p < bb[lbb_list[0]].iloc[-1] * 1.07: conds.append("✅ 볼린저 하단영역")
@@ -70,7 +57,6 @@ def analyze_logic(df, name, is_coin=False):
                 tag = "🪙 [코인매수]" if is_coin else "🟢 [주식매수]"
                 send_alert(f"{tag} {name}\n가: {curr_p:,.0f}\nRSI: {curr_rsi:.1f}\n" + "\n".join(conds))
 
-        # [매도 조건]
         elif curr_rsi > 55 and curr_p > prev_p:
             if curr_p < ma5.iloc[-1] * 1.03: conds.append("❌ 5일선 이탈징후")
             if curr_p > bb[ubb_list[0]].iloc[-1] * 0.93: conds.append("❌ 볼린저 상단영역")
@@ -78,7 +64,8 @@ def analyze_logic(df, name, is_coin=False):
             if conds:
                 tag = "🪙 [코인매도]" if is_coin else "🔴 [주식매도]"
                 send_alert(f"{tag} {name}\n가: {curr_p:,.0f}\nRSI: {curr_rsi:.1f}\n" + "\n".join(conds))
-    except: pass
+    except:
+        pass
 
 def scan_stocks(m_type):
     try:
@@ -88,6 +75,7 @@ def scan_stocks(m_type):
                 try:
                     df = fdr.DataReader(row['Code']).tail(60)
                     analyze_logic(df, row['Name'])
+                    time.sleep(0.1)
                 except: continue
         else:
             stocks = fdr.StockListing('S&P500').head(100)
@@ -95,27 +83,22 @@ def scan_stocks(m_type):
                 try:
                     df = fdr.DataReader(row['Symbol']).tail(60)
                     analyze_logic(df, row['Symbol'])
+                    time.sleep(0.1)
                 except: continue
     except: pass
 
 def scan_coins():
-    # 주요 코인 10종 스캔
     tickers = ["KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-ADA", "KRW-DOGE", "KRW-DOT", "KRW-TRX", "KRW-AVAX", "KRW-LINK"]
     for t in tickers:
         try:
             df = pyupbit.get_ohlcv(t, interval="day", count=60)
             if df is not None:
                 analyze_logic(df, t.replace("KRW-",""), is_coin=True)
+            time.sleep(0.1)
         except: continue
 
 if __name__ == "__main__":
-    # 1. 텔레그램 작동 메시지 확인
-    check_status_reply()
-    
-    # 2. 코인 스캔 (무조건 실행)
     scan_coins()
-    
-    # 3. 주식 스캔 (장 시간에만 실행)
     status = get_market_status()
     if status in ["KOREA", "USA"]:
         scan_stocks(status)
