@@ -2,8 +2,8 @@ name: Stock and Crypto Bot
 
 on:
   schedule:
-    - cron: '0,30 * * * *'  # <-- 1-5를 삭제하고 *로 변경 (매일 30분마다 실행)
-  workflow_dispatch:
+    - cron: '0,30 * * * *'  # 매일 30분마다 (요일 제한 없음)
+  workflow_dispatch:        # 수동 실행 버튼 활성화
 
 jobs:
   build:
@@ -13,14 +13,13 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Set up Python
-        uses: 
         uses: actions/setup-python@v2
         with:
           python-version: '3.9'
 
       - name: Install dependencies
         run: |
-          pip install pandas pandas_ta FinanceDataReader requests pytz pyupbit  # <-- pyupbit 추가
+          pip install pandas pandas_ta FinanceDataReader requests pytz pyupbit
           
       - name: Run bot
         env:
