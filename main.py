@@ -5,7 +5,11 @@ from datetime import datetime
 
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
-last_msg_id = 0 # 중복 응답 방지용
+
+# 상태 관리를 위한 변수들
+last_msg_id = 0
+alert_count = {}  # { '삼성전자': 3, 'BTC': 1 } 식으로 횟수 저장
+last_date = ""    # 날짜 변경 감지용
 
 def send_alert(msg):
     if not (TOKEN and CHAT_ID): return
@@ -15,7 +19,6 @@ def send_alert(msg):
     except: pass
 
 def check_status_request():
-    """텔레그램 메시지 확인: '작동?' 질문에 응답"""
     global last_msg_id
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
@@ -26,24 +29,28 @@ def check_status_request():
             msg_id = last_update.get("update_id")
             if ("작동?" in msg_text or "상태?" in msg_text) and msg_id != last_msg_id:
                 now = datetime.now(pytz.timezone('Asia/Seoul'))
-                send_alert(f"✅ 정상 가동 중입니다!\n🕒 확인 시각: {now.strftime('%H:%M:%S')}\n📊 코스피50/미장/코인 스캔 중")
+                send_alert(f"✅ 정상 가동 중!\n🕒 {now.strftime('%H:%M:%S')}\n📊 종목당 일일 최대 3회 제한 적용 중")
                 last_msg_id = msg_id
     except: pass
 
 def analyze(df, name, market_type):
+    global alert_count
     try:
+        # 하루 3회 제한 체크
+        current_count = alert_count.get(name, 0)
+        if current_count >= 3:
+            return # 3번 넘었으면 분석 패스
+
         if df is None or len(df) < 35: return
         c = df['Close']
         prev_close, curr_price = c.iloc[-2], c.iloc[-1]
         
-        # RSI 14 (문턱 낮춤: 45/55)
+        # 지표 계산 (RSI 45/55, MA5, BB, MACD)
         diff = c.diff()
         up = diff.where(diff > 0, 0).rolling(14).mean()
         down = (-diff.where(diff < 0, 0)).rolling(14).mean()
-        rsi = 100 - (100 / (1 + (up / (down + 1e-10))))
-        curr_rsi = rsi.iloc[-1]
+        rsi = (100 - (100 / (1 + (up / (down + 1e-10))))).iloc[-1]
 
-        # 지표 계산 (5일선, 볼밴, MACD)
         ma5 = c.rolling(5).mean().iloc[-1]
         ma20 = c.rolling(20).mean()
         std20 = c.rolling(20).std()
@@ -52,46 +59,62 @@ def analyze(df, name, market_type):
         macd = ema12 - ema26
         curr_macd, prev_macd = macd.iloc[-1], macd.iloc[-2]
 
-        # 매수 판정 (RSI <= 45 & 2개 이상)
-        if curr_rsi <= 45 and (market_type == "코인" or curr_price < prev_close):
+        # 매수/매도 로직
+        is_hit = False
+        msg = ""
+
+        if rsi <= 45 and (market_type == "코인" or curr_price < prev_close):
             cond = []
             if curr_price <= ma5: cond.append("1")
             if curr_price <= bbl * 1.05: cond.append("2")
             if curr_macd > prev_macd: cond.append("3")
             if len(cond) >= 2:
-                send_alert(f"🟢[{market_type}] {name} {curr_rsi:.0f} ({','.join(cond)})")
+                msg = f"🟢[{market_type}] {name} {rsi:.0f} ({','.join(cond)}) [{current_count+1}/3]"
+                is_hit = True
 
-        # 매도 판정 (RSI >= 55 & 2개 이상)
-        elif curr_rsi >= 55 and (market_type == "코인" or curr_price > prev_close):
+        elif rsi >= 55 and (market_type == "코인" or curr_price > prev_close):
             m_cond = []
             if curr_price >= ma5: m_cond.append("1")
             if curr_price >= bbu * 0.95: m_cond.append("2")
             if curr_macd < prev_macd: m_cond.append("3")
             if len(m_cond) >= 2:
-                send_alert(f"🔴[{market_type}] {name} {curr_rsi:.0f} ({','.join(m_cond)})")
+                msg = f"🔴[{market_type}] {name} {rsi:.0f} ({','.join(m_cond)}) [{current_count+1}/3]"
+                is_hit = True
+
+        if is_hit:
+            send_alert(msg)
+            alert_count[name] = current_count + 1 # 횟수 증가
     except: pass
 
 def run_loop():
-    send_alert("🚀 [전략 가동] 실시간 스캔 및 응답 모드 시작")
+    global alert_count, last_date
+    send_alert("🚀 [전략 가동] 종목별 3회 제한 모드 시작")
     start_time = time.time()
     
     while True:
-        if time.time() - start_time > 20000: break # 5.5시간 후 종료
+        if time.time() - start_time > 20000: break
 
-        check_status_request() # 텔레그램 질문 확인
-
-        now = datetime.now(pytz.timezone('Asia/Seoul'))
+        KST = pytz.timezone('Asia/Seoul')
+        now = datetime.now(KST)
+        curr_date = now.strftime('%Y%m%d')
         curr_time = int(now.strftime('%H%M'))
-        is_weekday = now.weekday() < 5
 
-        # 1. 코인 (상위 10개)
+        # 날짜가 바뀌면 횟수 초기화
+        if curr_date != last_date:
+            alert_count = {}
+            last_date = curr_date
+            print(f"{curr_date} 새로운 날짜 - 알림 횟수 초기화 완료")
+
+        check_status_request()
+
+        # 1. 코인
         try:
             for t in pyupbit.get_tickers(fiat="KRW")[:10]:
                 analyze(pyupbit.get_ohlcv(t, interval="minute1", count=50), t.split("-")[1], "코인")
         except: pass
 
-        # 2. 국장 (코스피 시총 상위 50개)
-        if is_weekday and 900 <= curr_time <= 1530:
+        # 2. 국장 (코스피 50)
+        if (now.weekday() < 5) and 900 <= curr_time <= 1530:
             try:
                 kospi = fdr.StockListing('KOSPI').sort_values('Marcap', ascending=False).head(50)
                 for _, r in kospi.iterrows():
@@ -99,8 +122,8 @@ def run_loop():
                     time.sleep(0.05)
             except: pass
         
-        # 3. 미국 주식 (S&P500 상위 100개)
-        if is_weekday and (curr_time >= 2230 or curr_time <= 500):
+        # 3. 미장 (S&P 100)
+        if (now.weekday() < 5) and (curr_time >= 2230 or curr_time <= 500):
             try:
                 us = fdr.StockListing('S&P500').head(100)
                 for _, r in us.iterrows():
