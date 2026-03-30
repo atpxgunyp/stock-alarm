@@ -11,52 +11,68 @@ def send_alert(msg):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         requests.post(url, json={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-    except: pass
+    except Exception as e:
+        print(f"텔레그램 발송 실패: {e}")
 
 def analyze(df, name, market_type):
+    # (RSI 필수 + 2개 이상 조건 로직은 동일)
     try:
         if df is None or len(df) < 35: return
         c = df['Close']
-        prev_close = c.iloc[-2] 
-        curr_price = c.iloc[-1]
-        
-        # RSI 14
-        diff = c.diff()
-        up = diff.where(diff > 0, 0).rolling(14).mean()
-        down = (-diff.where(diff < 0, 0)).rolling(14).mean()
-        rsi = 100 - (100 / (1 + (up / (down + 1e-10))))
-        curr_rsi = rsi.iloc[-1]
-
-        # 지표 계산
-        ma5 = c.rolling(5).mean()
-        ma20 = c.rolling(20).mean()
-        std20 = c.rolling(20).std()
-        bbu, bbl = ma20 + (std20 * 2), ma20 - (std20 * 2)
-        ema12, ema26 = c.ewm(span=12).mean(), c.ewm(span=26).mean()
-        macd = ema12 - ema26
-        pmacd = macd.iloc[-2]
-
-        market_tag = f"[{market_type}]"
-        
-        # [매수 판정]
-        if curr_rsi <= 40 and (market_type == "코인" or curr_price < prev_close):
-            cond = []
-            if (curr_price >= ma5.iloc[-1] * 0.98): cond.append("1")
-            if (curr_price <= bbl.iloc[-1] * 1.03): cond.append("2")
-            if (macd.iloc[-1] > pmacd): cond.append("3")
-            
-            if len(cond) >= 2: # 3개 중 2개 이상 만족 시
-                send_alert(f"🟢{market_tag} {name} {curr_rsi:.0f} ({','.join(cond)})")
-
-        # [매도 판정]
-        elif curr_rsi >= 60 and (market_type == "코인" or curr_price > prev_close):
-            m_cond = []
-            if (curr_price <= ma5.iloc[-1] * 1.02): m_cond.append("1")
-            if (curr_price >= bbu.iloc[-1] * 0.97): m_cond.append("2")
-            if (macd.iloc[-1] < pmacd): m_cond.append("3")
-            
-            if len(m_cond) >= 2: # 3개 중 2개 이상 만족 시
-                send_alert(f"🔴{market_tag} {name} {curr_rsi:.0f} ({','.join(m_cond)})")
+        # ... (중략: RSI, MA5, BB, MACD 계산 로직) ...
+        # (앞서 드린 analyze 함수 내용 그대로 넣으시면 됩니다)
     except: pass
 
-# ... (이하 run_loop 함수 및 시장 시간 로직은 이전과 동일) ...
+def run_loop():
+    print("시스템 가동 시작...")
+    send_alert("🚀 [실시간 모니터링] 감시를 시작합니다. (종료 시까지 무한 반복)")
+    
+    start_time = time.time()
+    
+    while True:
+        # 5시간 30분 지나면 안전하게 종료 (GitHub 6시간 제한 대비)
+        if time.time() - start_time > 20000:
+            print("재시작을 위해 루프 종료")
+            break
+
+        # 한국 시간 강제 설정
+        KST = pytz.timezone('Asia/Seoul')
+        now = datetime.now(KST)
+        curr_time = int(now.strftime('%H%M')) # 예: 10시 55분 -> 1055
+        is_weekday = now.weekday() < 5
+
+        print(f"현재 시각(KST): {now.strftime('%Y-%m-%d %H:%M:%S')} | 상태: 스캔 중")
+
+        # 1. 코인 (24시간)
+        try:
+            coins = pyupbit.get_tickers(fiat="KRW")[:10]
+            for t in coins:
+                analyze(pyupbit.get_ohlcv(t, interval="minute1", count=50), t.split("-")[1], "코인")
+        except Exception as e:
+            print(f"코인 에러: {e}")
+
+        # 2. 한국 주식 (09:00 ~ 15:30)
+        if is_weekday and 900 <= curr_time <= 1530:
+            print(">>> 한국 시장 스캔 실행 중")
+            try:
+                krx = fdr.StockListing('KRX').sort_values('Marcap', ascending=False).head(100)
+                for _, r in krx.iterrows():
+                    analyze(fdr.DataReader(r['Code']).tail(50), r['Name'], "국장")
+            except Exception as e:
+                print(f"국장 에러: {e}")
+        
+        # 3. 미국 주식 (22:30 ~ 05:00)
+        if is_weekday and (curr_time >= 2230 or curr_time <= 500):
+            print(">>> 미국 시장 스캔 실행 중")
+            try:
+                us = fdr.StockListing('S&P500').head(100)
+                for _, r in us.iterrows():
+                    analyze(fdr.DataReader(r['Symbol']).tail(50), r['Symbol'], "미장")
+            except Exception as e:
+                print(f"미장 에러: {e}")
+
+        print("1분 대기 후 재스캔...")
+        time.sleep(60)
+
+if __name__ == "__main__":
+    run_loop()
